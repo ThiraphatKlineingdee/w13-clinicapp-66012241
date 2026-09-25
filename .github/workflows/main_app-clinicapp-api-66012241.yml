@@ -24,7 +24,6 @@ jobs:
           node-version: '22.x'
 
       - name: npm install, build, and test
-        working-directory: ./server
         run: |
           npm install
           npm run build --if-present
@@ -52,9 +51,9 @@ jobs:
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_5124FCECF8C44A1CAFF176C1D129404D }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_64FB2E803C2B410C8DD3E97C2E2938EA }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_EC397E0AD56F4793BD0AEB8E1619DDC5 }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_39E2F7660ED84F50BF5A71B31F109C79 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_3BB75AAC6C154FE2B9800F0570DB2C8D }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_4850DB22AA4A43C59EE57A38BB26568E }}
 
       - name: 'Deploy to Azure Web App'
         id: deploy-to-webapp
@@ -62,5 +61,5 @@ jobs:
         with:
           app-name: 'app-clinicapp-api-66012241'
           slot-name: 'Production'
-          package: ./server
+          package: .
           
