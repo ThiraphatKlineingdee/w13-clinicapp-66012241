@@ -26,7 +26,7 @@ jobs:
       - name: npm install, build, and test
         working-directory: ./web
         env:                         # <--- 2. เพิ่ม 2 บรรทัดนี้ (อย่าลืมแก้ URL เป็นของ API คุณ)
-          VITE_API_BASE: app-clinicapp-api-66012241-aqfkgpaxetd2bng4.southeastasia-01.azurewebsites.net
+          VITE_API_BASE: https://app-clinicapp-api-66012241-aqfkgpaxetd2bng4.southeastasia-01.azurewebsites.net
         run: |
           npm install
           npm run build --if-present
