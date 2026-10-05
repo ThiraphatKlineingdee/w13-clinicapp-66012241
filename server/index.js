@@ -10,44 +10,69 @@ const PORT = process.env.PORT || 8080;
 app.use(cors());
 app.use(express.json());
 
-app.get('/', (_req, res) => res.json({ ok: true, service: 'clinic-api' }));
+app.get('/', (_req, res) => res.json({ ok: true, service: 'boardgame-api' }));
 
-app.get('/doctors', async (_req, res, next) => {
+app.get('/boardgames', async (_req, res, next) => {
   try {
     const pool = await getSqlPool();
     const r = await pool.request()
-      .query('SELECT id, name, specialty FROM doctors ORDER BY name');
+      .query('SELECT id, name, category, image_url FROM boardgames ORDER BY name');
     res.json(r.recordset);
   } catch (e) { next(e); }
 });
 
-app.get('/appointments', async (_req, res, next) => {
+app.get('/bookings', async (_req, res, next) => {
   try {
     const pool = await getSqlPool();
     const r = await pool.request().query(`
-      SELECT a.id, a.patient_name, a.slot, d.name AS doctor_name, d.specialty
-      FROM appointments a JOIN doctors d ON a.doctor_id = d.id
-      ORDER BY a.slot
+      SELECT b.id, b.player_name, b.slot, b.end_time, g.name AS game_name, g.category, g.image_url
+      FROM bookings b JOIN boardgames g ON b.game_id = g.id
+      ORDER BY b.slot
     `);
     res.json(r.recordset);
   } catch (e) { next(e); }
 });
 
-app.post('/appointments', async (req, res, next) => {
-  const { doctor_id, patient_name, slot } = req.body || {};
-  if (!doctor_id || !patient_name || !slot) {
-    return res.status(400).json({ error: 'doctor_id, patient_name, slot are required' });
+app.post('/bookings', async (req, res, next) => {
+  const { game_id, player_name, start_time, end_time } = req.body || {};
+  if (!game_id || !player_name || !start_time || !end_time) {
+    return res.status(400).json({ error: 'game_id, player_name, start_time, end_time are required' });
   }
   try {
     const pool = await getSqlPool();
-    const r = await pool.request()
-      .input('doctor_id', sql.Int, Number(doctor_id))
-      .input('patient_name', sql.NVarChar(200), String(patient_name))
-      .input('slot', sql.DateTime2, new Date(slot))
+    const targetStart = new Date(start_time);
+    const targetEnd = new Date(end_time);
+
+    if (targetEnd <= targetStart) {
+      return res.status(400).json({ error: 'invalid_duration', message: 'เวลาสิ้นสุดต้องมากกว่าเวลาเริ่ม' });
+    }
+    
+    // Check for overlapping bookings
+    // Overlap condition: existing.start < new.end AND existing.end > new.start
+    const checkR = await pool.request()
+      .input('game_id', sql.Int, Number(game_id))
+      .input('new_start', sql.DateTime2, targetStart)
+      .input('new_end', sql.DateTime2, targetEnd)
       .query(`
-        INSERT INTO appointments (doctor_id, patient_name, slot)
-        OUTPUT INSERTED.id, INSERTED.doctor_id, INSERTED.patient_name, INSERTED.slot
-        VALUES (@doctor_id, @patient_name, @slot)
+        SELECT id FROM bookings 
+        WHERE game_id = @game_id 
+        AND slot < @new_end 
+        AND end_time > @new_start
+      `);
+      
+    if (checkR.recordset.length > 0) {
+      return res.status(409).json({ error: 'already_booked', message: 'ช่วงเวลานี้มีคนจองเกมนี้ไปแล้วครับ' });
+    }
+
+    const r = await pool.request()
+      .input('game_id', sql.Int, Number(game_id))
+      .input('player_name', sql.NVarChar(200), String(player_name))
+      .input('slot', sql.DateTime2, targetStart)
+      .input('end_time', sql.DateTime2, targetEnd)
+      .query(`
+        INSERT INTO bookings (game_id, player_name, slot, end_time)
+        OUTPUT INSERTED.id, INSERTED.game_id, INSERTED.player_name, INSERTED.slot, INSERTED.end_time
+        VALUES (@game_id, @player_name, @slot, @end_time)
       `);
     res.status(201).json(r.recordset[0]);
   } catch (e) { next(e); }
@@ -67,20 +92,20 @@ app.use((err, _req, res, _next) => {
 const isDirectRun = process.argv[1] && process.argv[1].endsWith('index.js');
 if (isDirectRun) {
   app.listen(PORT, () => {
-    console.log(`clinic-api listening on :${PORT}`);
+    console.log(`boardgame-api listening on :${PORT}`);
   });
 }
-// delete appointment by id
-app.delete('/appointments/:id', async (req, res, next) => {
+// delete booking by id
+app.delete('/bookings/:id', async (req, res, next) => {
   const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id <= 0) {
+  if (!Number.isInteger(id) || id < 0) {
     return res.status(400).json({ error: 'invalid_id' });
   }
   try {
     const pool = await getSqlPool();
     const r = await pool.request()
       .input('id', sql.Int, id)
-      .query('DELETE FROM appointments WHERE id = @id');
+      .query('DELETE FROM bookings WHERE id = @id');
     if (r.rowsAffected[0] === 0) {
       return res.status(404).json({ error: 'not_found' });
     }
@@ -88,4 +113,3 @@ app.delete('/appointments/:id', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 export default app;
-

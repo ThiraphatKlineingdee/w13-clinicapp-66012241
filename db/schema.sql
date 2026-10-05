@@ -1,26 +1,27 @@
--- W13 Clinic App — Azure SQL schema
--- Run this against your Azure SQL Database `clinicdb`
+-- W13 Board Game Cafe App — Azure SQL schema
+-- Run this against your Azure SQL Database
 -- Compatible with Azure SQL (uses IDENTITY, NVARCHAR, DATETIME2)
 
-IF OBJECT_ID('appointments', 'U') IS NOT NULL DROP TABLE appointments;
-IF OBJECT_ID('doctors',     'U') IS NOT NULL DROP TABLE doctors;
+IF OBJECT_ID('bookings', 'U') IS NOT NULL DROP TABLE bookings;
+IF OBJECT_ID('boardgames', 'U') IS NOT NULL DROP TABLE boardgames;
 
-CREATE TABLE doctors (
+CREATE TABLE boardgames (
   id        INT             IDENTITY(1,1) PRIMARY KEY,
   name      NVARCHAR(100)   NOT NULL,
-  specialty NVARCHAR(100)   NOT NULL,
+  category  NVARCHAR(100)   NOT NULL,
+  image_url NVARCHAR(1000)  NULL,
   created   DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME()
 );
 
-CREATE TABLE appointments (
+CREATE TABLE bookings (
   id           INT            IDENTITY(1,1) PRIMARY KEY,
-  doctor_id    INT            NOT NULL,
-  patient_name NVARCHAR(200)  NOT NULL,
+  game_id      INT            NOT NULL,
+  player_name  NVARCHAR(200)  NOT NULL,
   slot         DATETIME2      NOT NULL,
   created      DATETIME2      NOT NULL DEFAULT SYSUTCDATETIME(),
-  CONSTRAINT fk_appointments_doctor
-    FOREIGN KEY (doctor_id) REFERENCES doctors(id)
+  CONSTRAINT fk_bookings_game
+    FOREIGN KEY (game_id) REFERENCES boardgames(id)
     ON DELETE CASCADE
 );
 
-CREATE INDEX ix_appointments_slot ON appointments (slot);
+CREATE INDEX ix_bookings_slot ON bookings (slot);
