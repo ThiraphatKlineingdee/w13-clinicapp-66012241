@@ -7,7 +7,15 @@ export default function App() {
   const [bookings, setBookings] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
-  
+
+  // Auth State
+  const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('user')) || null);
+  const [token, setToken] = useState(() => localStorage.getItem('token') || null);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [authForm, setAuthForm] = useState({ username: '', password: '' });
+  const [authError, setAuthError] = useState(null);
+
   // Helper to generate the next 7 days dynamically on render
   const getAvailableDates = () => {
     return Array.from({ length: 7 }).map((_, i) => {
@@ -30,7 +38,7 @@ export default function App() {
     return { value: h, label: `${10 + i}:00` };
   });
 
-  // Form state
+  // Booking Form state
   const [selectedGame, setSelectedGame] = useState(null);
   const [form, setForm] = useState({ date: availableDates[0].value, start_time: '10:00:00', end_time: '12:00:00', player_name: '' });
   const [submitting, setSubmitting] = useState(false);
@@ -54,7 +62,55 @@ export default function App() {
 
   useEffect(() => { load(); }, []);
 
+  // Sync auth state to localStorage
+  useEffect(() => {
+    if (user && token) {
+      localStorage.setItem('user', JSON.stringify(user));
+      localStorage.setItem('token', token);
+    } else {
+      localStorage.removeItem('user');
+      localStorage.removeItem('token');
+    }
+  }, [user, token]);
+
+  const handleLogout = () => {
+    setUser(null);
+    setToken(null);
+  };
+
+  const handleAuthSubmit = async (e) => {
+    e.preventDefault();
+    setAuthError(null);
+    const endpoint = isRegistering ? '/register' : '/login';
+    try {
+      const res = await fetch(`${API_BASE}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(authForm)
+      });
+      const data = await res.json();
+      if (!res.ok) throw data;
+
+      if (isRegistering) {
+        // Auto switch to login after register
+        alert('สมัครสมาชิกสำเร็จ กรุณาล็อกอิน');
+        setIsRegistering(false);
+        setAuthForm(f => ({ ...f, password: '' }));
+      } else {
+        setToken(data.token);
+        setUser(data.user);
+        setShowAuthModal(false);
+      }
+    } catch (e) {
+      setAuthError(e.message || e.error || 'auth_failed');
+    }
+  };
+
   const openBookingModal = (g) => {
+    if (!user) {
+      setShowAuthModal(true);
+      return;
+    }
     setSelectedGame(g);
     setError(null);
     setForm(f => ({ ...f, date: getAvailableDates()[0].value }));
@@ -72,7 +128,10 @@ export default function App() {
       
       const r = await fetch(`${API_BASE}/bookings`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
           game_id: selectedGame.id,
           player_name: form.player_name,
@@ -88,7 +147,6 @@ export default function App() {
       setSelectedGame(null); // Close modal
       await load();
     } catch (e) {
-      // Show custom message if provided by backend, else generic error
       setError(e.message || e.error || 'failed_to_reserve');
     } finally {
       setSubmitting(false);
@@ -100,34 +158,35 @@ export default function App() {
     setCancellingId(id);
     setError(null);
     try {
-      const r = await fetch(`${API_BASE}/bookings/${id}`, { method: 'DELETE' });
+      const r = await fetch(`${API_BASE}/bookings/${id}`, { 
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       if (!r.ok) throw await r.json().catch(() => ({ error: 'http_error' }));
       await load();
     } catch (e) {
-      setError(e.error || 'failed_to_cancel');
+      alert(e.message || e.error || 'failed_to_cancel');
     } finally {
       setCancellingId(null);
     }
   }
 
-  // Check if chosen time range overlaps with any existing booking for the selected game
   function isTimeRangeBooked(startStr, endStr) {
     if (!selectedGame || !form.date) return false;
     try {
       const targetStart = new Date(`${form.date}T${startStr}`);
       const targetEnd = new Date(`${form.date}T${endStr}`);
       
-      if (targetEnd <= targetStart) return true; // Invalid range
+      if (targetEnd <= targetStart) return true;
       
       return bookings.some(b => {
         if (b.game_id !== selectedGame.id) return false;
         const bStart = new Date(b.slot);
         const bEnd = new Date(b.end_time || new Date(bStart.getTime() + 2*60*60*1000));
-        // Overlap condition: bStart < targetEnd AND bEnd > targetStart
         return (bStart < targetEnd && bEnd > targetStart);
       });
     } catch (e) {
-      return false; // invalid date input
+      return false;
     }
   }
 
@@ -136,9 +195,23 @@ export default function App() {
   
   return (
     <div className="container">
-      <header className="header">
-        <h1>Meeple's Board Game Cafe 🎲</h1>
-        <p>Reserve a table & your favorite board games to play with friends!</p>
+      <header className="header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h1>Meeple's Board Game Cafe 🎲</h1>
+          <p>Reserve a table & your favorite board games to play with friends!</p>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          {user ? (
+            <div>
+              <p style={{ margin: '0 0 0.5rem 0', fontWeight: 'bold' }}>
+                👤 {user.username} {user.role === 'admin' && <span style={{color:'gold'}}>(Admin)</span>}
+              </p>
+              <button className="btn-danger" onClick={handleLogout} style={{ padding: '0.4rem 1rem' }}>Logout</button>
+            </div>
+          ) : (
+            <button onClick={() => setShowAuthModal(true)}>Login / Register</button>
+          )}
+        </div>
       </header>
 
       {loading && <p>Loading…</p>}
@@ -179,44 +252,97 @@ export default function App() {
                 </tr>
               </thead>
               <tbody>
-                {bookings.map(b => (
-                  <tr key={b.id}>
-                    <td>
-                      <strong>{new Date(b.slot).toLocaleDateString('en-US')}</strong><br/>
-                      <span style={{ color: 'var(--text-muted)' }}>
-                        {new Date(b.slot).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-                        {b.end_time ? ` - ${new Date(b.end_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}` : ''}
-                      </span>
-                    </td>
-                    <td>{b.player_name}</td>
-                    <td>
-                      <div className="booking-game">
-                        {b.image_url && <img src={b.image_url} alt={b.game_name} className="booking-thumb" />}
-                        <div>
-                          <div style={{ fontWeight: 500 }}>{b.game_name}</div>
-                          <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{b.category}</div>
+                {bookings.map(b => {
+                  // Only admin or the booking owner can cancel
+                  const canCancel = user && (user.role === 'admin' || user.id === b.user_id);
+                  return (
+                    <tr key={b.id}>
+                      <td>
+                        <strong>{new Date(b.slot).toLocaleDateString('en-US')}</strong><br/>
+                        <span style={{ color: 'var(--text-muted)' }}>
+                          {new Date(b.slot).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                          {b.end_time ? ` - ${new Date(b.end_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}` : ''}
+                        </span>
+                      </td>
+                      <td>{b.player_name}</td>
+                      <td>
+                        <div className="booking-game">
+                          {b.image_url && <img src={b.image_url} alt={b.game_name} className="booking-thumb" />}
+                          <div>
+                            <div style={{ fontWeight: 500 }}>{b.game_name}</div>
+                            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{b.category}</div>
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                    <td>
-                      <button 
-                        className="btn-danger"
-                        onClick={() => onCancel(b.id)} 
-                        disabled={cancellingId === b.id}
-                      >
-                        {cancellingId === b.id ? '...' : 'Cancel'}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td>
+                        {canCancel ? (
+                          <button 
+                            className="btn-danger"
+                            onClick={() => onCancel(b.id)} 
+                            disabled={cancellingId === b.id}
+                          >
+                            {cancellingId === b.id ? '...' : 'Cancel'}
+                          </button>
+                        ) : (
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>No Permission</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </section>
 
+      {/* Auth Modal */}
+      {showAuthModal && (
+        <div className="modal-overlay" onClick={() => setShowAuthModal(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+            <button className="modal-close" onClick={() => setShowAuthModal(false)}>×</button>
+            <h2 style={{ marginTop: 0 }}>{isRegistering ? 'Register' : 'Login'}</h2>
+            
+            {authError && <div className="error-msg">⚠️ {authError}</div>}
+            
+            <form onSubmit={handleAuthSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1.5rem' }}>
+              <div>
+                <label style={{ display: 'block', marginBottom: '0.5rem' }}>Username</label>
+                <input 
+                  type="text" 
+                  style={{ width: '100%', padding: '0.75rem', borderRadius: '4px', border: '1px solid #444', background: '#333', color: 'white' }}
+                  value={authForm.username} 
+                  onChange={e => setAuthForm(f => ({...f, username: e.target.value}))} 
+                  required 
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', marginBottom: '0.5rem' }}>Password</label>
+                <input 
+                  type="password" 
+                  style={{ width: '100%', padding: '0.75rem', borderRadius: '4px', border: '1px solid #444', background: '#333', color: 'white' }}
+                  value={authForm.password} 
+                  onChange={e => setAuthForm(f => ({...f, password: e.target.value}))} 
+                  required 
+                />
+              </div>
+              <button type="submit" style={{ marginTop: '1rem' }}>
+                {isRegistering ? 'Sign Up' : 'Sign In'}
+              </button>
+              
+              <div style={{ textAlign: 'center', marginTop: '1rem', fontSize: '0.9rem' }}>
+                {isRegistering ? "Already have an account? " : "Don't have an account? "}
+                <a href="#" onClick={(e) => { e.preventDefault(); setIsRegistering(!isRegistering); setAuthError(null); }} style={{ color: 'var(--primary-color)' }}>
+                  {isRegistering ? 'Login here' : 'Register here'}
+                </a>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Booking Modal */}
-      {selectedGame && (
+      {selectedGame && user && (
         <div className="modal-overlay" onClick={() => setSelectedGame(null)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <button className="modal-close" onClick={() => setSelectedGame(null)}>×</button>
