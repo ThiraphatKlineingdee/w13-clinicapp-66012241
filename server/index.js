@@ -5,6 +5,9 @@ import sql from 'mssql';
 import { getSqlPool } from './db.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import multer from 'multer';
+import fs from 'fs';
+import path from 'path';
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -12,6 +15,29 @@ const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-boardgame';
 
 app.use(cors());
 app.use(express.json());
+
+// Create uploads directory if it doesn't exist
+const uploadDir = './uploads';
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+
+// Serve static files from uploads folder
+app.use('/uploads', express.static('uploads'));
+
+// Configure Multer for image uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  }
+});
+const upload = multer({
+  storage,
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) cb(null, true);
+    else cb(new Error('Only images are allowed'));
+  }
+});
 
 // Auth Middleware
 function authenticateToken(req, res, next) {
@@ -81,22 +107,25 @@ app.get('/boardgames', async (_req, res, next) => {
   } catch (e) { next(e); }
 });
 
-app.post('/boardgames', authenticateToken, async (req, res, next) => {
+app.post('/boardgames', authenticateToken, upload.single('image'), async (req, res, next) => {
   if (req.user.role !== 'admin') {
     return res.status(403).json({ error: 'forbidden', message: 'เฉพาะ Admin เท่านั้นที่สามารถเพิ่มเกมใหม่ได้' });
   }
 
-  const { name, category, image_url, quantity } = req.body || {};
+  const { name, category, quantity } = req.body || {};
   if (!name || !category) {
     return res.status(400).json({ error: 'bad_request', message: 'กรุณากรอกชื่อและหมวดหมู่เกม' });
   }
+  
+  // If a file was uploaded, save its URL, else use URL from body (if provided)
+  const image_url = req.file ? `/uploads/${req.file.filename}` : (req.body.image_url || null);
 
   try {
     const pool = await getSqlPool();
     const r = await pool.request()
       .input('name', sql.NVarChar(100), name)
       .input('cat', sql.NVarChar(100), category)
-      .input('img', sql.NVarChar(500), image_url || null)
+      .input('img', sql.NVarChar(500), image_url)
       .input('qty', sql.Int, Number(quantity) || 1)
       .query(`
         INSERT INTO boardgames (name, category, image_url, quantity)

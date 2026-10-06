@@ -18,8 +18,14 @@ export default function App() {
 
   // Add Game State
   const [showAddGameModal, setShowAddGameModal] = useState(false);
-  const [addGameForm, setAddGameForm] = useState({ name: '', category: '', image_url: '', quantity: 1 });
+  const [addGameForm, setAddGameForm] = useState({ name: '', category: '', image_url: '', imageFile: null, quantity: 1 });
   const [addingGame, setAddingGame] = useState(false);
+
+  const getImageUrl = (url) => {
+    if (!url) return '';
+    if (url.startsWith('/uploads')) return `${API_BASE}${url}`;
+    return url;
+  };
 
   // Helper to generate the next 7 days dynamically on render
   const getAvailableDates = () => {
@@ -113,17 +119,26 @@ export default function App() {
     setAddingGame(true);
     setError(null);
     try {
+      const formData = new FormData();
+      formData.append('name', addGameForm.name);
+      formData.append('category', addGameForm.category);
+      formData.append('quantity', addGameForm.quantity);
+      if (addGameForm.imageFile) {
+        formData.append('image', addGameForm.imageFile);
+      } else if (addGameForm.image_url) {
+        formData.append('image_url', addGameForm.image_url);
+      }
+
       const r = await fetch(`${API_BASE}/boardgames`, {
         method: 'POST',
         headers: { 
-          'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify(addGameForm)
+        body: formData
       });
       if (!r.ok) throw await r.json().catch(() => ({ error: 'http_error' }));
       
-      setAddGameForm({ name: '', category: '', image_url: '', quantity: 1 });
+      setAddGameForm({ name: '', category: '', image_url: '', imageFile: null, quantity: 1 });
       setShowAddGameModal(false);
       await load(); // Reload grid
     } catch (e) {
@@ -264,7 +279,7 @@ export default function App() {
           <div className="games-grid">
             {boardgames.map(g => (
               <div key={g.id} className="game-card" onClick={() => openBookingModal(g)}>
-                {g.image_url && <img src={g.image_url} alt={g.name} className="game-img" />}
+                {g.image_url && <img src={getImageUrl(g.image_url)} alt={g.name} className="game-img" />}
                 <div className="game-info">
                   <h3>{g.name}</h3>
                   <p>{g.category} • {g.quantity || 1} กล่อง</p>
@@ -305,7 +320,7 @@ export default function App() {
                       <td>{b.player_name}</td>
                       <td>
                         <div className="booking-game">
-                          {b.image_url && <img src={b.image_url} alt={b.game_name} className="booking-thumb" />}
+                          {b.image_url && <img src={getImageUrl(b.image_url)} alt={b.game_name} className="booking-thumb" />}
                           <div>
                             <div style={{ fontWeight: 500 }}>{b.game_name}</div>
                             <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{b.category}</div>
@@ -373,12 +388,19 @@ export default function App() {
                 />
               </div>
               <div className="form-group-full">
-                <label>Image URL (Optional)</label>
+                <label>Image</label>
+                <input 
+                  type="file" 
+                  accept="image/*"
+                  onChange={e => setAddGameForm(f => ({...f, imageFile: e.target.files[0]}))} 
+                  style={{ marginBottom: '0.5rem' }}
+                />
+                <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>Or use an Image URL:</div>
                 <input 
                   type="text" 
                   value={addGameForm.image_url} 
                   onChange={e => setAddGameForm(f => ({...f, image_url: e.target.value}))} 
-                  placeholder="/images/catan.jpg หรือ URL รูปภาพ"
+                  placeholder="https://example.com/image.jpg"
                 />
               </div>
               <div className="form-group-full" style={{ marginTop: '1rem' }}>
@@ -443,7 +465,7 @@ export default function App() {
             <button className="modal-close" onClick={() => setSelectedGame(null)}>×</button>
             
             <div className="modal-header">
-              {selectedGame.image_url && <img src={selectedGame.image_url} alt={selectedGame.name} />}
+              {selectedGame.image_url && <img src={getImageUrl(selectedGame.image_url)} alt={selectedGame.name} />}
               <div>
                 <h2>{selectedGame.name}</h2>
                 <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.875rem' }}>
