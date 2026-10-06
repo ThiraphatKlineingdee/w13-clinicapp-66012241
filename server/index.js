@@ -76,8 +76,34 @@ app.get('/boardgames', async (_req, res, next) => {
   try {
     const pool = await getSqlPool();
     const r = await pool.request()
-      .query('SELECT id, name, category, image_url FROM boardgames ORDER BY name');
+      .query('SELECT id, name, category, image_url, quantity FROM boardgames ORDER BY name');
     res.json(r.recordset);
+  } catch (e) { next(e); }
+});
+
+app.post('/boardgames', authenticateToken, async (req, res, next) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'forbidden', message: 'เฉพาะ Admin เท่านั้นที่สามารถเพิ่มเกมใหม่ได้' });
+  }
+
+  const { name, category, image_url, quantity } = req.body || {};
+  if (!name || !category) {
+    return res.status(400).json({ error: 'bad_request', message: 'กรุณากรอกชื่อและหมวดหมู่เกม' });
+  }
+
+  try {
+    const pool = await getSqlPool();
+    const r = await pool.request()
+      .input('name', sql.NVarChar(100), name)
+      .input('cat', sql.NVarChar(100), category)
+      .input('img', sql.NVarChar(500), image_url || null)
+      .input('qty', sql.Int, Number(quantity) || 1)
+      .query(`
+        INSERT INTO boardgames (name, category, image_url, quantity)
+        OUTPUT INSERTED.id, INSERTED.name, INSERTED.category, INSERTED.image_url, INSERTED.quantity
+        VALUES (@name, @cat, @img, @qty)
+      `);
+    res.status(201).json(r.recordset[0]);
   } catch (e) { next(e); }
 });
 
@@ -107,20 +133,26 @@ app.post('/bookings', authenticateToken, async (req, res, next) => {
       return res.status(400).json({ error: 'invalid_duration', message: 'เวลาสิ้นสุดต้องมากกว่าเวลาเริ่ม' });
     }
     
+    // Get game quantity
+    const gameR = await pool.request()
+      .input('game_id', sql.Int, Number(game_id))
+      .query('SELECT quantity FROM boardgames WHERE id = @game_id');
+    const quantity = gameR.recordset.length > 0 ? (gameR.recordset[0].quantity || 1) : 1;
+    
     // Check for overlapping bookings
     const checkR = await pool.request()
       .input('game_id', sql.Int, Number(game_id))
       .input('new_start', sql.DateTime2, targetStart)
       .input('new_end', sql.DateTime2, targetEnd)
       .query(`
-        SELECT id FROM bookings 
+        SELECT COUNT(id) AS overlap_count FROM bookings 
         WHERE game_id = @game_id 
         AND slot < @new_end 
         AND end_time > @new_start
       `);
       
-    if (checkR.recordset.length > 0) {
-      return res.status(409).json({ error: 'already_booked', message: 'ช่วงเวลานี้มีคนจองเกมนี้ไปแล้วครับ' });
+    if (checkR.recordset[0].overlap_count >= quantity) {
+      return res.status(409).json({ error: 'already_booked', message: 'ช่วงเวลานี้เกมถูกจองเต็มจำนวนแล้วครับ' });
     }
 
     const r = await pool.request()

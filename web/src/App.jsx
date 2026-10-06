@@ -16,12 +16,17 @@ export default function App() {
   const [authForm, setAuthForm] = useState({ username: '', password: '' });
   const [authError, setAuthError] = useState(null);
 
+  // Add Game State
+  const [showAddGameModal, setShowAddGameModal] = useState(false);
+  const [addGameForm, setAddGameForm] = useState({ name: '', category: '', image_url: '', quantity: 1 });
+  const [addingGame, setAddingGame] = useState(false);
+
   // Helper to generate the next 7 days dynamically on render
   const getAvailableDates = () => {
     return Array.from({ length: 7 }).map((_, i) => {
       const d = new Date();
       d.setDate(d.getDate() + i);
-      const value = d.toISOString().split('T')[0]; // YYYY-MM-DD
+      const value = d.toISOString().split('T')[0];
       const display = d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' });
       return { 
         value, 
@@ -32,7 +37,6 @@ export default function App() {
 
   const availableDates = getAvailableDates();
   
-  // Generate hours for dropdowns (10:00 to 22:00)
   const hoursOptions = Array.from({length: 13}).map((_, i) => {
     const h = (10 + i).toString().padStart(2, '0') + ':00:00';
     return { value: h, label: `${10 + i}:00` };
@@ -62,7 +66,6 @@ export default function App() {
 
   useEffect(() => { load(); }, []);
 
-  // Sync auth state to localStorage
   useEffect(() => {
     if (user && token) {
       localStorage.setItem('user', JSON.stringify(user));
@@ -92,7 +95,6 @@ export default function App() {
       if (!res.ok) throw data;
 
       if (isRegistering) {
-        // Auto switch to login after register
         alert('สมัครสมาชิกสำเร็จ กรุณาล็อกอิน');
         setIsRegistering(false);
         setAuthForm(f => ({ ...f, password: '' }));
@@ -103,6 +105,31 @@ export default function App() {
       }
     } catch (e) {
       setAuthError(e.message || e.error || 'auth_failed');
+    }
+  };
+
+  const handleAddGameSubmit = async (e) => {
+    e.preventDefault();
+    setAddingGame(true);
+    setError(null);
+    try {
+      const r = await fetch(`${API_BASE}/boardgames`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(addGameForm)
+      });
+      if (!r.ok) throw await r.json().catch(() => ({ error: 'http_error' }));
+      
+      setAddGameForm({ name: '', category: '', image_url: '', quantity: 1 });
+      setShowAddGameModal(false);
+      await load(); // Reload grid
+    } catch (e) {
+      alert(e.message || e.error || 'failed_to_add_game');
+    } finally {
+      setAddingGame(false);
     }
   };
 
@@ -144,7 +171,7 @@ export default function App() {
         throw e;
       }
       setForm({ date: getAvailableDates()[0].value, start_time: '10:00:00', end_time: '12:00:00', player_name: '' });
-      setSelectedGame(null); // Close modal
+      setSelectedGame(null);
       await load();
     } catch (e) {
       setError(e.message || e.error || 'failed_to_reserve');
@@ -179,12 +206,13 @@ export default function App() {
       
       if (targetEnd <= targetStart) return true;
       
-      return bookings.some(b => {
+      const overlaps = bookings.filter(b => {
         if (b.game_id !== selectedGame.id) return false;
         const bStart = new Date(b.slot);
         const bEnd = new Date(b.end_time || new Date(bStart.getTime() + 2*60*60*1000));
         return (bStart < targetEnd && bEnd > targetStart);
       });
+      return overlaps.length >= (selectedGame.quantity || 1);
     } catch (e) {
       return false;
     }
@@ -196,7 +224,7 @@ export default function App() {
   return (
     <div className="container">
       <header className="header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
+        <div style={{ textAlign: 'left' }}>
           <h1>Meeple's Board Game Cafe 🎲</h1>
           <p>Reserve a table & your favorite board games to play with friends!</p>
         </div>
@@ -218,7 +246,18 @@ export default function App() {
       {error && !selectedGame && <div className="error-msg">Error: {error}</div>}
 
       <section>
-        <h2 style={{ marginBottom: '1.5rem' }}>Available Games (Click to Reserve)</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+          <h2 style={{ margin: 0 }}>Available Games (Click to Reserve)</h2>
+          {user && user.role === 'admin' && (
+            <button 
+              style={{ width: 'auto', background: '#10b981', color: 'white' }} 
+              onClick={() => setShowAddGameModal(true)}
+            >
+              ➕ Add New Game
+            </button>
+          )}
+        </div>
+        
         {boardgames.length === 0 ? (
           <p>(no games — load schema.sql + seed-data.sql first)</p>
         ) : (
@@ -228,7 +267,7 @@ export default function App() {
                 {g.image_url && <img src={g.image_url} alt={g.name} className="game-img" />}
                 <div className="game-info">
                   <h3>{g.name}</h3>
-                  <p>{g.category}</p>
+                  <p>{g.category} • {g.quantity || 1} กล่อง</p>
                 </div>
               </div>
             ))}
@@ -253,7 +292,6 @@ export default function App() {
               </thead>
               <tbody>
                 {bookings.map(b => {
-                  // Only admin or the booking owner can cancel
                   const canCancel = user && (user.role === 'admin' || user.id === b.user_id);
                   return (
                     <tr key={b.id}>
@@ -295,6 +333,63 @@ export default function App() {
           </div>
         )}
       </section>
+
+      {/* Add Game Modal */}
+      {showAddGameModal && (
+        <div className="modal-overlay" onClick={() => setShowAddGameModal(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setShowAddGameModal(false)}>×</button>
+            <h2 style={{ marginTop: 0 }}>➕ Add New Game</h2>
+            
+            <form onSubmit={handleAddGameSubmit} className="form-grid" style={{ marginTop: '1.5rem' }}>
+              <div className="form-group-full">
+                <label>Game Name</label>
+                <input 
+                  type="text" 
+                  value={addGameForm.name} 
+                  onChange={e => setAddGameForm(f => ({...f, name: e.target.value}))} 
+                  required 
+                  placeholder="e.g. Catan"
+                />
+              </div>
+              <div>
+                <label>Category</label>
+                <input 
+                  type="text" 
+                  value={addGameForm.category} 
+                  onChange={e => setAddGameForm(f => ({...f, category: e.target.value}))} 
+                  required 
+                  placeholder="e.g. Strategy"
+                />
+              </div>
+              <div>
+                <label>Quantity (Boxes)</label>
+                <input 
+                  type="number" 
+                  min="1"
+                  value={addGameForm.quantity} 
+                  onChange={e => setAddGameForm(f => ({...f, quantity: Number(e.target.value)}))} 
+                  required 
+                />
+              </div>
+              <div className="form-group-full">
+                <label>Image URL (Optional)</label>
+                <input 
+                  type="text" 
+                  value={addGameForm.image_url} 
+                  onChange={e => setAddGameForm(f => ({...f, image_url: e.target.value}))} 
+                  placeholder="/images/catan.jpg หรือ URL รูปภาพ"
+                />
+              </div>
+              <div className="form-group-full" style={{ marginTop: '1rem' }}>
+                <button type="submit" disabled={addingGame} style={{ background: '#10b981', color: 'white' }}>
+                  {addingGame ? 'Adding...' : 'Save Game'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Auth Modal */}
       {showAuthModal && (
@@ -351,7 +446,9 @@ export default function App() {
               {selectedGame.image_url && <img src={selectedGame.image_url} alt={selectedGame.name} />}
               <div>
                 <h2>{selectedGame.name}</h2>
-                <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.875rem' }}>{selectedGame.category}</p>
+                <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+                  {selectedGame.category} • {selectedGame.quantity || 1} กล่อง
+                </p>
               </div>
             </div>
 
